@@ -160,31 +160,28 @@ function playBuzzer(){
   g.gain.exponentialRampToValueAtTime(0.001,t+0.5);
   o1.start(t);o1.stop(t+0.5);o2.start(t);o2.stop(t+0.5);}catch(e){}
 }
-function playFanfare(){
+function playFanfareSynth(){
   try{const c=ac(),t=c.currentTime,m=c.createGain();
   m.gain.setValueAtTime(0.3,t);m.gain.setValueAtTime(0.3,t+1.8);
   m.gain.exponentialRampToValueAtTime(0.001,t+2.5);m.connect(c.destination);
-  // Trumpet-like: brass triads with bright timbre
   const notes=[
     {f:523,s:0,d:0.15},{f:659,s:0.15,d:0.15},{f:784,s:0.3,d:0.15},
-    {f:1047,s:0.5,d:0.4},// high C hold
-    {f:784,s:1.0,d:0.12},{f:880,s:1.12,d:0.12},{f:1047,s:1.3,d:0.6},// final C
+    {f:1047,s:0.5,d:0.4},{f:784,s:1.0,d:0.12},{f:880,s:1.12,d:0.12},{f:1047,s:1.3,d:0.6},
   ];
   notes.forEach(n=>{
-    // Each note: fundamental + harmonics for brass timbre
     [1,2,3,4].forEach((h,hi)=>{
       const o=c.createOscillator(),g=c.createGain();
-      o.type=hi===0?'sawtooth':'sine';
-      o.frequency.value=n.f*h;
+      o.type=hi===0?'sawtooth':'sine';o.frequency.value=n.f*h;
       const vol=0.25/(h*h);
-      g.gain.setValueAtTime(0,t+n.s);
-      g.gain.linearRampToValueAtTime(vol,t+n.s+0.02);
-      g.gain.setValueAtTime(vol,t+n.s+n.d*0.7);
-      g.gain.exponentialRampToValueAtTime(0.001,t+n.s+n.d+0.1);
-      o.connect(g);g.connect(m);
-      o.start(t+n.s);o.stop(t+n.s+n.d+0.15);
+      g.gain.setValueAtTime(0,t+n.s);g.gain.linearRampToValueAtTime(vol,t+n.s+0.02);
+      g.gain.setValueAtTime(vol,t+n.s+n.d*0.7);g.gain.exponentialRampToValueAtTime(0.001,t+n.s+n.d+0.1);
+      o.connect(g);g.connect(m);o.start(t+n.s);o.stop(t+n.s+n.d+0.15);
     });
   });}catch(e){}
+}
+function playFanfare(){
+  const a=new Audio('/Victory.mp3');
+  a.play().catch(()=>playFanfareSynth());
 }
 function playApplause(big){
   try{const c=ac(),dur=big?5:3.5,t=c.currentTime,m=c.createGain();
