@@ -92,7 +92,7 @@ function unlockAudio(){
     const ctx=ac();
     const buf=ctx.createBuffer(1,1,22050);const src=ctx.createBufferSource();
     src.buffer=buf;src.connect(ctx.destination);src.start(0);
-    audioUnlocked=true;
+    audioUnlocked=true;preloadVictory();
   }catch(e){}
 }
 
@@ -160,6 +160,14 @@ function playBuzzer(){
   g.gain.exponentialRampToValueAtTime(0.001,t+0.5);
   o1.start(t);o1.stop(t+0.5);o2.start(t);o2.stop(t+0.5);}catch(e){}
 }
+let victoryBuffer=null;
+// Pre-fetch and decode Victory.mp3 into AudioContext buffer on load
+function preloadVictory(){
+  fetch('/Victory.mp3').then(r=>{if(r.ok)return r.arrayBuffer();throw 0;})
+    .then(ab=>ac().decodeAudioData(ab))
+    .then(buf=>{victoryBuffer=buf;})
+    .catch(()=>{});
+}
 function playFanfareSynth(){
   try{const c=ac(),t=c.currentTime,m=c.createGain();
   m.gain.setValueAtTime(0.3,t);m.gain.setValueAtTime(0.3,t+1.8);
@@ -180,8 +188,10 @@ function playFanfareSynth(){
   });}catch(e){}
 }
 function playFanfare(){
-  const a=new Audio('/Victory.mp3');
-  a.play().catch(()=>playFanfareSynth());
+  if(victoryBuffer){
+    try{const c=ac(),src=c.createBufferSource();src.buffer=victoryBuffer;src.connect(c.destination);src.start(0);return;}catch(e){}
+  }
+  playFanfareSynth();
 }
 function playApplause(big){
   try{const c=ac(),dur=big?5:3.5,t=c.currentTime,m=c.createGain();
@@ -258,7 +268,7 @@ const BYE_LINES=[
   "Bye bye {state}!","You're outta here, {state}!","See ya later, {state}!",
   "So long, {state}!","Hit the road, {state}!","Adios, {state}!",
   "Peace out, {state}!","Better luck next time, {state}!",
-  "{state}, you've been eliminated!","Goodbye, {state}!",
+  "{state}, you've been eliminated!","Goodbye, {state}!","Outta here, {state}! Gone!",
 ];
 
 function getQuizChoices(stateName){
