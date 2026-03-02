@@ -59,6 +59,21 @@ function centroid(geom,name){
 }
 const hsl=(i,n)=>`hsl(${(i*360/n)%360},${60+((i*5)%15)}%,${50+((i*3)%12)}%)`;
 
+// ===== iOS AUDIO UNLOCK =====
+let audioUnlocked=false;
+function unlockAudio(){
+  if(audioUnlocked)return;
+  try{
+    const ctx=new(window.AudioContext||window.webkitAudioContext)();
+    const buf=ctx.createBuffer(1,1,22050);const src=ctx.createBufferSource();
+    src.buffer=buf;src.connect(ctx.destination);src.start(0);
+    acRef.current=ctx;
+    const a=new Audio();a.src='data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+    a.play().then(()=>a.pause()).catch(()=>{});
+    audioUnlocked=true;
+  }catch(e){}
+}
+
 // ===== AUDIO =====
 const acRef={current:null};
 function ac(){if(!acRef.current)acRef.current=new(window.AudioContext||window.webkitAudioContext)();return acRef.current;}
@@ -133,12 +148,7 @@ function playApplause(big){
   sbp.frequency.value=1500+Math.random()*2500;sbp.Q.value=0.5;const sg=c.createGain();sg.gain.value=0.08+Math.random()*0.06;
   ss.connect(sbp);sbp.connect(sg);sg.connect(m);ss.start(st);ss.stop(st+sd);}}}catch(e){}
 }
-function playEliminate(){
-  try{const c=ac(),o=c.createOscillator(),g=c.createGain();o.connect(g);g.connect(c.destination);
-  o.type='sawtooth';o.frequency.setValueAtTime(300,c.currentTime);o.frequency.exponentialRampToValueAtTime(80,c.currentTime+0.5);
-  g.gain.setValueAtTime(0.2,c.currentTime);g.gain.exponentialRampToValueAtTime(0.001,c.currentTime+0.5);
-  o.start(c.currentTime);o.stop(c.currentTime+0.5);}catch(e){}
-}
+
 async function speak(text,opts={}){
   if(currentTTS){currentTTS.pause();currentTTS=null;}
   window.speechSynthesis?.cancel();
@@ -364,6 +374,8 @@ export default function App(){
   const [trans2,setTrans2]=useState(false);
   const [transB,setTransB]=useState(false);
 
+  const showBattle=phase==='battleReady'||phase==='countdown'||phase==='battling'||phase==='result';
+
   const showFlash=(text,color,emoji,duration=1200,sub='')=>{
     setFlashText(text);setFlashColor(color);setFlashEmoji(emoji||'');setFlashSub(sub);setFlashVisible(true);
     setTimeout(()=>setFlashVisible(false),duration);
@@ -373,6 +385,14 @@ export default function App(){
     const h=()=>window.speechSynthesis?.getVoices();
     window.speechSynthesis?.addEventListener?.('voiceschanged',h);
     return()=>window.speechSynthesis?.removeEventListener?.('voiceschanged',h);},[]);
+
+  useEffect(()=>{
+    // Unlock audio on first user interaction (needed for iOS/iPad)
+    const handler=()=>{unlockAudio();document.removeEventListener('touchstart',handler);document.removeEventListener('click',handler);};
+    document.addEventListener('touchstart',handler,{once:true});
+    document.addEventListener('click',handler,{once:true});
+    return()=>{document.removeEventListener('touchstart',handler);document.removeEventListener('click',handler);};
+  },[]);
 
   useEffect(()=>{
     fetch('https://cdn.jsdelivr.net/npm/us-atlas@3/states-albers-10m.json')
@@ -387,7 +407,7 @@ export default function App(){
     const df=(tg-cur%360+360)%360;return cur+360*(5+Math.floor(Math.random()*3))+df+(Math.random()-0.5)*sl*0.3;};
 
   const getFighters=useCallback(()=>{
-    if(active.length<2)return;setWinner(null);setLoser(null);setMapF1(null);setMapF2(null);setF1(null);setF2(null);
+    if(active.length<2)return;unlockAudio();setWinner(null);setLoser(null);setMapF1(null);setMapF2(null);setF1(null);setF2(null);
     const items=[...active];const i1=Math.floor(Math.random()*items.length);
     let i2=Math.floor(Math.random()*(items.length-1));if(i2>=i1)i2++;
     setPendingF1(items[i1]);setPendingF2(items[i2]);
@@ -410,7 +430,7 @@ export default function App(){
     setTimeout(()=>speak('versus '+pendingF2),200);setTimeout(()=>setPhase('battleReady'),1600);};
 
   const doBattle=()=>{
-    const w=Math.random()<0.5?0:1;window._bw=w;setPhase('countdown');
+    unlockAudio();const w=Math.random()<0.5?0:1;window._bw=w;setPhase('countdown');
     setCountdown(3);playCountdownBeep(false);
     setTimeout(()=>{setCountdown(2);playCountdownBeep(false);},700);
     setTimeout(()=>{setCountdown(1);playCountdownBeep(false);},1400);
@@ -455,7 +475,8 @@ export default function App(){
 
   return(
     <div style={{minHeight:'100vh',background:'linear-gradient(150deg,#0f172a 0%,#1e1b4b 40%,#172554 100%)',
-      color:'#e2e8f0',fontFamily:'system-ui,-apple-system,sans-serif',padding:12,boxSizing:'border-box',position:'relative',overflow:'hidden'}}>
+      color:'#e2e8f0',fontFamily:'system-ui,-apple-system,sans-serif',padding:12,boxSizing:'border-box',position:'relative',overflow:'hidden'}}
+      onClick={unlockAudio}>
       <Confetti active={confettiActive} duration={phase==='champion'?6000:3500}/>
       <FlashOverlay text={flashText} color={flashColor} emoji={flashEmoji} visible={flashVisible} sub={flashSub}/>
       <CountdownOverlay number={countdown}/>
@@ -514,11 +535,17 @@ export default function App(){
             )}
           </div>
 
-          <Wheel items={active} size={W} rotation={rot1} transitioning={trans1} onEnd={onW1End}/>
-          <Wheel items={active} size={W} rotation={rot2} transitioning={trans2} onEnd={onW2End}/>
+          {/* Selection wheels - hidden during battle */}
+          {!showBattle&&(
+            <>
+              <Wheel items={active} size={W} rotation={rot1} transitioning={trans1} onEnd={onW1End}/>
+              <Wheel items={active} size={W} rotation={rot2} transitioning={trans2} onEnd={onW2End}/>
+            </>
+          )}
 
-          {(phase==='battleReady'||phase==='countdown'||phase==='battling'||phase==='result')&&f1&&f2&&(
-            <div style={{marginTop:8,width:'100%',background:'rgba(0,0,0,0.35)',borderRadius:16,padding:12,
+          {/* Battle section - replaces wheels during battle */}
+          {showBattle&&f1&&f2&&(
+            <div style={{width:'100%',background:'rgba(0,0,0,0.35)',borderRadius:16,padding:12,
               border:'2px solid rgba(251,191,36,0.15)',animation:'slideUp 0.4s ease-out'}}>
               <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:10}}>
                 <FighterCard name={f1} color="#2563eb" emoji="🔵"/>
