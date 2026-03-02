@@ -50,7 +50,7 @@ const CAPITALS={
   "Wisconsin":"Madison","Wyoming":"Cheyenne"
 };
 const NO_QUIZ=["Washington DC","Puerto Rico"];
-const ISLANDS=["Alaska","Hawaii","Washington DC","Puerto Rico"];
+const ISLANDS=["Alaska","Hawaii","Puerto Rico"];
 const ADJ={
   "Alabama":["Mississippi","Tennessee","Georgia","Florida"],
   "Alaska":[],"Arizona":["California","Nevada","Utah","Colorado","New Mexico"],
@@ -118,11 +118,13 @@ ALL_ENTITIES.forEach((s,i)=>{STATE_COLORS[s]=COLOR_LIST[i%COLOR_LIST.length];});
 
 function getValidTargets(fighter,territories,active){
   const owned=Object.entries(territories).filter(([_,o])=>o===fighter).map(([t])=>t);
+  const wildIslands=ISLANDS.filter(isl=>territories[isl]===isl);
   const targetOwners=new Set();
   owned.forEach(t=>{
-    const neighbors=ISLANDS.includes(t)?ALL_ENTITIES.filter(x=>x!==t):(ADJ[t]||[]);
+    const isWild=ISLANDS.includes(t)&&territories[t]===t;
+    const neighbors=isWild?ALL_ENTITIES.filter(x=>x!==t):(ADJ[t]||[]);
     neighbors.forEach(n=>{const owner=territories[n];if(owner&&owner!==fighter&&active.includes(owner))targetOwners.add(owner);});
-    if(!ISLANDS.includes(t)){ISLANDS.forEach(isl=>{const owner=territories[isl];if(owner&&owner!==fighter&&active.includes(owner))targetOwners.add(owner);});}
+    if(!ISLANDS.includes(t)){wildIslands.forEach(isl=>{const owner=territories[isl];if(owner&&owner!==fighter&&active.includes(owner))targetOwners.add(owner);});}
   });
   if(targetOwners.size===0)active.filter(s=>s!==fighter).forEach(s=>targetOwners.add(s));
   return[...targetOwners];
