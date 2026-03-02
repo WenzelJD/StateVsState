@@ -32,6 +32,22 @@ const NUDGE={
   "Kentucky":[-5,2],"Tennessee":[-5,0],"North Carolina":[-5,4],
   "Oklahoma":[-8,0],"New York":[-5,5],"Pennsylvania":[-5,2]
 };
+const CAPITALS={
+  "Alabama":"Montgomery","Alaska":"Juneau","Arizona":"Phoenix","Arkansas":"Little Rock",
+  "California":"Sacramento","Colorado":"Denver","Connecticut":"Hartford","Delaware":"Dover",
+  "Florida":"Tallahassee","Georgia":"Atlanta","Hawaii":"Honolulu","Idaho":"Boise",
+  "Illinois":"Springfield","Indiana":"Indianapolis","Iowa":"Des Moines","Kansas":"Topeka",
+  "Kentucky":"Frankfort","Louisiana":"Baton Rouge","Maine":"Augusta","Maryland":"Annapolis",
+  "Massachusetts":"Boston","Michigan":"Lansing","Minnesota":"Saint Paul","Mississippi":"Jackson",
+  "Missouri":"Jefferson City","Montana":"Helena","Nebraska":"Lincoln","Nevada":"Carson City",
+  "New Hampshire":"Concord","New Jersey":"Trenton","New Mexico":"Santa Fe","New York":"Albany",
+  "North Carolina":"Raleigh","North Dakota":"Bismarck","Ohio":"Columbus","Oklahoma":"Oklahoma City",
+  "Oregon":"Salem","Pennsylvania":"Harrisburg","Rhode Island":"Providence","South Carolina":"Columbia",
+  "South Dakota":"Pierre","Tennessee":"Nashville","Texas":"Austin","Utah":"Salt Lake City",
+  "Vermont":"Montpelier","Virginia":"Richmond","Washington":"Olympia","West Virginia":"Charleston",
+  "Wisconsin":"Madison","Wyoming":"Cheyenne"
+};
+const ALL_CAPS=Object.values(CAPITALS);
 const ALL_STATES=Object.values(FIPS).sort();
 
 function topoFeature(topo,name){
@@ -59,7 +75,6 @@ function centroid(geom,name){
 }
 const hsl=(i,n)=>`hsl(${(i*360/n)%360},${60+((i*5)%15)}%,${50+((i*3)%12)}%)`;
 
-// ===== iOS AUDIO UNLOCK =====
 let audioUnlocked=false;
 function unlockAudio(){
   if(audioUnlocked)return;
@@ -74,7 +89,6 @@ function unlockAudio(){
   }catch(e){}
 }
 
-// ===== AUDIO =====
 const acRef={current:null};
 function ac(){if(!acRef.current)acRef.current=new(window.AudioContext||window.webkitAudioContext)();return acRef.current;}
 
@@ -121,6 +135,26 @@ function playCountdownBeep(high){
   o.type='square';o.frequency.value=high?880:440;g.gain.setValueAtTime(0.2,c.currentTime);
   g.gain.exponentialRampToValueAtTime(0.001,c.currentTime+(high?0.3:0.15));
   o.start(c.currentTime);o.stop(c.currentTime+(high?0.3:0.15));}catch(e){}
+}
+function playDing(){
+  try{const c=ac(),t=c.currentTime;
+  [880,1108,1320].forEach((f,i)=>{
+    const o=c.createOscillator(),g=c.createGain();o.connect(g);g.connect(c.destination);
+    o.type='sine';o.frequency.value=f;
+    g.gain.setValueAtTime(0,t+i*0.08);g.gain.linearRampToValueAtTime(0.25,t+i*0.08+0.02);
+    g.gain.exponentialRampToValueAtTime(0.001,t+i*0.08+0.6);
+    o.start(t+i*0.08);o.stop(t+i*0.08+0.6);
+  });}catch(e){}
+}
+function playBuzzer(){
+  try{const c=ac(),t=c.currentTime;
+  const o1=c.createOscillator(),o2=c.createOscillator(),g=c.createGain();
+  o1.connect(g);o2.connect(g);g.connect(c.destination);
+  o1.type='sawtooth';o1.frequency.value=120;
+  o2.type='square';o2.frequency.value=123;
+  g.gain.setValueAtTime(0.35,t);g.gain.setValueAtTime(0.35,t+0.35);
+  g.gain.exponentialRampToValueAtTime(0.001,t+0.5);
+  o1.start(t);o1.stop(t+0.5);o2.start(t);o2.stop(t+0.5);}catch(e){}
 }
 function playApplause(big){
   try{const c=ac(),dur=big?5:3.5,t=c.currentTime,m=c.createGain();
@@ -169,7 +203,14 @@ async function speak(text,opts={}){
   }
 }
 
-// ===== CONFETTI =====
+function getQuizChoices(stateName){
+  const correct=CAPITALS[stateName];
+  const others=ALL_CAPS.filter(c=>c!==correct);
+  const shuffled=[...others].sort(()=>Math.random()-0.5);
+  const choices=[correct,shuffled[0],shuffled[1]].sort(()=>Math.random()-0.5);
+  return{correct,choices};
+}
+
 function Confetti({active,duration=3000}){
   const canvasRef=useRef(null);const animRef=useRef(null);const particles=useRef([]);const startRef=useRef(0);
   useEffect(()=>{
@@ -343,6 +384,85 @@ function CountdownOverlay({number}){
   </div>);
 }
 
+function QuizOverlay({stateName,onComplete}){
+  const [quiz]=useState(()=>getQuizChoices(stateName));
+  const [selected,setSelected]=useState(null);
+  const [shake,setShake]=useState(null);
+  const [correct,setCorrect]=useState(false);
+  const hasSpoken=useRef(false);
+
+  useEffect(()=>{
+    if(hasSpoken.current)return;hasSpoken.current=true;
+    const q=`What is the capital of ${stateName}? Is it ${quiz.choices[0]}, ${quiz.choices[1]}, or ${quiz.choices[2]}?`;
+    setTimeout(()=>speak(q),600);
+  },[stateName,quiz.choices]);
+
+  const handleChoice=(choice)=>{
+    if(correct)return;
+    if(choice===quiz.correct){
+      setSelected(choice);setCorrect(true);playDing();
+      setTimeout(()=>speak(`Correct! ${quiz.correct} is the capital of ${stateName}!`),300);
+      setTimeout(()=>onComplete(),3000);
+    }else{
+      setShake(choice);playBuzzer();
+      speak("Try again!");
+      setTimeout(()=>setShake(null),600);
+    }
+  };
+
+  const btnStyle=(choice)=>{
+    const isCorrectChoice=choice===quiz.correct;
+    const isShaking=shake===choice;
+    let bg='linear-gradient(135deg,#334155,#1e293b)';
+    let border='2px solid #475569';
+    let shadow='0 4px 12px rgba(0,0,0,0.3)';
+    let anim='';
+    if(correct&&isCorrectChoice){bg='linear-gradient(135deg,#16a34a,#15803d)';border='2px solid #4ade80';shadow='0 4px 20px rgba(74,222,128,0.4)';}
+    if(isShaking){bg='linear-gradient(135deg,#dc2626,#b91c1c)';border='2px solid #f87171';anim='quizShake 0.4s ease-in-out';shadow='0 4px 20px rgba(248,113,113,0.4)';}
+    return{padding:'16px 24px',fontSize:18,fontWeight:700,color:'#fff',background:bg,border,borderRadius:14,
+      cursor:correct?'default':'pointer',boxShadow:shadow,animation:anim,transition:'all 0.2s',width:'100%',textAlign:'center'};
+  };
+
+  return(
+    <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,display:'flex',alignItems:'center',justifyContent:'center',
+      background:'rgba(0,0,0,0.75)',zIndex:1002}} onClick={e=>e.stopPropagation()}>
+      <div style={{background:'linear-gradient(150deg,#1e293b,#0f172a)',borderRadius:24,padding:'32px 36px',
+        maxWidth:420,width:'90%',border:'3px solid rgba(251,191,36,0.3)',
+        boxShadow:'0 0 60px rgba(251,191,36,0.15)',animation:'scaleIn 0.3s ease-out'}}>
+        <div style={{textAlign:'center',marginBottom:6}}>
+          <div style={{fontSize:42,marginBottom:4}}>🧠</div>
+          <div style={{fontSize:14,color:'#94a3b8',fontWeight:600,textTransform:'uppercase',letterSpacing:2}}>Capital Quiz</div>
+        </div>
+        <div style={{textAlign:'center',marginBottom:24}}>
+          <div style={{fontSize:22,fontWeight:800,color:'#fbbf24',lineHeight:1.3}}>
+            What is the capital of
+          </div>
+          <div style={{fontSize:30,fontWeight:900,color:'#fff',marginTop:4,letterSpacing:1}}>
+            {stateName}?
+          </div>
+        </div>
+        <div style={{display:'flex',flexDirection:'column',gap:10}}>
+          {quiz.choices.map((c,i)=>(
+            <button key={c} onClick={()=>handleChoice(c)} style={btnStyle(c)}
+              onMouseEnter={e=>{if(!correct&&shake!==c)e.target.style.transform='scale(1.03)';}}
+              onMouseLeave={e=>{e.target.style.transform='scale(1)';}}>
+              <span style={{marginRight:8,color:'#94a3b8',fontSize:14}}>{String.fromCharCode(65+i)}.</span>{c}
+              {correct&&c===quiz.correct&&<span style={{marginLeft:8}}>✅</span>}
+            </button>
+          ))}
+        </div>
+        {correct&&(
+          <div style={{textAlign:'center',marginTop:16,animation:'scaleIn 0.3s ease-out'}}>
+            <div style={{fontSize:16,fontWeight:700,color:'#4ade80'}}>
+              🎉 {quiz.correct} is correct!
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App(){
   const [features,setFeatures]=useState([]);
   const [active,setActive]=useState(ALL_STATES);
@@ -373,8 +493,10 @@ export default function App(){
   const [trans1,setTrans1]=useState(false);
   const [trans2,setTrans2]=useState(false);
   const [transB,setTransB]=useState(false);
+  const [showQuiz,setShowQuiz]=useState(false);
+  const [quizScore,setQuizScore]=useState({correct:0,total:0});
 
-  const showBattle=phase==='battleReady'||phase==='countdown'||phase==='battling'||phase==='result';
+  const showBattle=phase==='battleReady'||phase==='countdown'||phase==='battling'||phase==='result'||phase==='quiz';
 
   const showFlash=(text,color,emoji,duration=1200,sub='')=>{
     setFlashText(text);setFlashColor(color);setFlashEmoji(emoji||'');setFlashSub(sub);setFlashVisible(true);
@@ -387,7 +509,6 @@ export default function App(){
     return()=>window.speechSynthesis?.removeEventListener?.('voiceschanged',h);},[]);
 
   useEffect(()=>{
-    // Unlock audio on first user interaction (needed for iOS/iPad)
     const handler=()=>{unlockAudio();document.removeEventListener('touchstart',handler);document.removeEventListener('click',handler);};
     document.addEventListener('touchstart',handler,{once:true});
     document.addEventListener('click',handler,{once:true});
@@ -445,14 +566,21 @@ export default function App(){
 
   const onBEnd=()=>{setTransB(false);const w=window._bw;
     const wn=w===0?f1:f2,ln=w===0?f2:f1;
-    setWinner(wn);setLoser(ln);new Audio('/Victory.mp3').play().catch(()=>{});setConfettiActive(true);
+    setWinner(wn);setLoser(ln);setConfettiActive(true);
     setTimeout(()=>setConfettiActive(false),3500);
     const calls=["wins!","takes it!","moves on!","is the winner!","dominates!","gets a huge victory!"];
     showFlash(wn+' Wins!','#4ade80','🎉',2500);
     setTimeout(()=>speak(wn+" "+calls[Math.floor(Math.random()*calls.length)]),1800);
     setLog(l=>[{round,f1,f2,winner:wn},...l]);setPhase('result');};
 
-  const nextRound=()=>{
+  const startQuiz=()=>{setShowQuiz(true);setPhase('quiz');};
+
+  const onQuizComplete=()=>{
+    setShowQuiz(false);setQuizScore(s=>({correct:s.correct+1,total:s.total+1}));
+    proceedToNext();
+  };
+
+  const proceedToNext=()=>{
     speak("Bye bye "+loser,{rate:1.1,pitch:1.1});
     const na=active.filter(n=>n!==loser),ne=[...eliminated,loser];
     setActive(na);setEliminated(ne);
@@ -467,8 +595,8 @@ export default function App(){
 
   const resetGame=()=>{setActive(ALL_STATES);setEliminated([]);setPhase('idle');
     setF1(null);setF2(null);setPendingF1(null);setPendingF2(null);setMapF1(null);setMapF2(null);
-    setWinner(null);setLoser(null);setChampion(null);
-    setRound(0);setLog([]);setRot1(0);setRot2(0);setRotB(0);};
+    setWinner(null);setLoser(null);setChampion(null);setShowQuiz(false);
+    setRound(0);setLog([]);setRot1(0);setRot2(0);setRotB(0);setQuizScore({correct:0,total:0});};
 
   const battleItems=f1&&f2?[f1,f2]:[];
   const W=220;
@@ -480,6 +608,7 @@ export default function App(){
       <Confetti active={confettiActive} duration={phase==='champion'?6000:3500}/>
       <FlashOverlay text={flashText} color={flashColor} emoji={flashEmoji} visible={flashVisible} sub={flashSub}/>
       <CountdownOverlay number={countdown}/>
+      {showQuiz&&winner&&<QuizOverlay stateName={winner} onComplete={onQuizComplete}/>}
 
       <div style={{textAlign:'center',marginBottom:8}}>
         <h1 style={{margin:0,fontSize:28,fontWeight:900,
@@ -490,13 +619,13 @@ export default function App(){
         </h1>
         <div style={{fontSize:13,color:'#94a3b8',marginTop:2,fontWeight:600}}>
           {champion?'🎉 We have a Grand Champion! 🎉':`Round ${round} · ${active.length} states remaining`}
+          {quizScore.total>0&&!champion&&<span style={{marginLeft:8}}>🧠 Quiz: {quizScore.correct}/{quizScore.total}</span>}
         </div>
       </div>
 
       <div style={{display:'flex',gap:14,alignItems:'flex-start',maxWidth:1200,margin:'0 auto'}}>
         <div style={{flex:'0 0 auto',width:W+24,display:'flex',flexDirection:'column',alignItems:'center',gap:4}}>
 
-          {/* Fixed button area above wheels */}
           <div style={{width:'100%',height:60,display:'flex',alignItems:'center',justifyContent:'center'}}>
             {phase==='idle'&&!champion&&(
               <button onClick={getFighters} disabled={active.length<2}
@@ -522,20 +651,19 @@ export default function App(){
               </button>
             )}
             {phase==='result'&&(
-              <button onClick={nextRound}
+              <button onClick={startQuiz}
                 style={{padding:'14px 28px',fontSize:16,fontWeight:700,
-                  background:'linear-gradient(135deg,#059669,#10b981)',color:'#fff',
+                  background:'linear-gradient(135deg,#7c3aed,#6d28d9)',color:'#fff',
                   border:'none',borderRadius:14,cursor:'pointer',
-                  boxShadow:'0 6px 22px rgba(16,185,129,0.4)',
+                  boxShadow:'0 6px 22px rgba(124,58,237,0.4)',
                   animation:'gentlePulse 2s ease-in-out infinite',letterSpacing:1}}
                 onMouseEnter={e=>e.target.style.transform='scale(1.05)'}
                 onMouseLeave={e=>e.target.style.transform='scale(1)'}>
-                {active.length<=2?'👑 Crown the Champion!':'➡️ Next Round!'}
+                🧠 Capital Quiz!
               </button>
             )}
           </div>
 
-          {/* Selection wheels - hidden during battle */}
           {!showBattle&&(
             <>
               <Wheel items={active} size={W} rotation={rot1} transitioning={trans1} onEnd={onW1End}/>
@@ -543,7 +671,6 @@ export default function App(){
             </>
           )}
 
-          {/* Battle section - replaces wheels during battle */}
           {showBattle&&f1&&f2&&(
             <div style={{width:'100%',background:'rgba(0,0,0,0.35)',borderRadius:16,padding:12,
               border:'2px solid rgba(251,191,36,0.15)',animation:'slideUp 0.4s ease-out'}}>
@@ -556,7 +683,7 @@ export default function App(){
 
               <Wheel items={battleItems} size={W} rotation={rotB} transitioning={transB} onEnd={onBEnd} duration={7}/>
 
-              {phase==='result'&&(
+              {(phase==='result'||phase==='quiz')&&(
                 <div style={{textAlign:'center',marginTop:10}}>
                   <div style={{fontSize:20,fontWeight:800,color:'#4ade80',marginBottom:4,
                     textShadow:'0 0 15px #4ade8044'}}>🏆 {winner} Wins!</div>
@@ -574,7 +701,7 @@ export default function App(){
               <div style={{fontSize:64,marginBottom:4,animation:'champBounce 1s ease-in-out infinite'}}>👑</div>
               <div style={{fontSize:28,fontWeight:900,color:'#fbbf24',letterSpacing:3}}>{champion}</div>
               <div style={{fontSize:16,color:'#f59e0b',margin:'8px 0',fontWeight:700}}>🏆 Grand Champion! 🏆</div>
-              <div style={{fontSize:12,color:'#94a3b8',fontWeight:600}}>Won {round} battles!</div>
+              <div style={{fontSize:12,color:'#94a3b8',fontWeight:600}}>Won {round} battles! · Quiz: {quizScore.correct}/{quizScore.total}</div>
               <button onClick={resetGame}
                 style={{marginTop:16,padding:'12px 24px',fontSize:14,fontWeight:700,
                   background:'linear-gradient(135deg,#7c3aed,#6d28d9)',color:'#fff',
@@ -634,6 +761,7 @@ export default function App(){
         @keyframes vsWiggle{0%,100%{transform:rotate(-5deg) scale(1)}50%{transform:rotate(5deg) scale(1.15)}}
         @keyframes champBounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}
         @keyframes champGlow{0%,100%{box-shadow:0 0 50px rgba(251,191,36,0.25)}50%{box-shadow:0 0 80px rgba(251,191,36,0.45)}}
+        @keyframes quizShake{0%,100%{transform:translateX(0)}15%{transform:translateX(-8px)}30%{transform:translateX(8px)}45%{transform:translateX(-6px)}60%{transform:translateX(6px)}75%{transform:translateX(-3px)}90%{transform:translateX(3px)}}
       `}</style>
     </div>
   );
