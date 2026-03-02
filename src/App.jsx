@@ -76,21 +76,23 @@ function centroid(geom,name){
 const hsl=(i,n)=>`hsl(${(i*360/n)%360},${60+((i*5)%15)}%,${50+((i*3)%12)}%)`;
 
 let audioUnlocked=false;
+const acRef={current:null};
+function ac(){
+  if(!acRef.current)acRef.current=new(window.AudioContext||window.webkitAudioContext)();
+  if(acRef.current.state==='suspended')acRef.current.resume().catch(()=>{});
+  return acRef.current;
+}
 function unlockAudio(){
   if(audioUnlocked)return;
   try{
-    const ctx=new(window.AudioContext||window.webkitAudioContext)();
+    const ctx=ac();
     const buf=ctx.createBuffer(1,1,22050);const src=ctx.createBufferSource();
     src.buffer=buf;src.connect(ctx.destination);src.start(0);
-    acRef.current=ctx;
     const a=new Audio();a.src='data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
     a.play().then(()=>a.pause()).catch(()=>{});
     audioUnlocked=true;
   }catch(e){}
 }
-
-const acRef={current:null};
-function ac(){if(!acRef.current)acRef.current=new(window.AudioContext||window.webkitAudioContext)();return acRef.current;}
 
 const ELEVEN_KEY='sk_48c0b41e89d95d9b9d0bfa159cc77c4856e33fd88dbaa233';
 const ELEVEN_VOICE='onwK4e9ZLuTAKqWW03F9';
@@ -183,11 +185,35 @@ function playApplause(big){
   ss.connect(sbp);sbp.connect(sg);sg.connect(m);ss.start(st);ss.stop(st+sd);}}}catch(e){}
 }
 
+// iOS requires Audio elements to be "primed" during user gesture.
+// We keep a pool of pre-created Audio elements ready to play.
+const audioPool=[];
+function getPooledAudio(){
+  let a=audioPool.find(x=>x.paused&&!x._inUse);
+  if(!a){a=new Audio();audioPool.push(a);}
+  a._inUse=true;
+  a.onended=()=>{a._inUse=false;};
+  a.onerror=()=>{a._inUse=false;};
+  return a;
+}
+// Prime audio pool on user gestures for iOS
+function primeAudioPool(){
+  if(audioPool.length<3){
+    for(let i=audioPool.length;i<3;i++){
+      const a=new Audio();a.src='data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+      a.play().then(()=>{a.pause();a.currentTime=0;a.src='';}).catch(()=>{});
+      audioPool.push(a);
+    }
+  }
+}
+
 async function speak(text,opts={}){
-  if(currentTTS){currentTTS.pause();currentTTS=null;}
+  if(currentTTS){currentTTS.pause();currentTTS.currentTime=0;currentTTS._inUse=false;currentTTS=null;}
   window.speechSynthesis?.cancel();
+  // Ensure AudioContext is active (iOS suspends it)
+  ac();
   const key=text.toLowerCase().trim();
-  if(ttsCache[key]){const a=new Audio(ttsCache[key]);currentTTS=a;a.play().catch(()=>{});return;}
+  if(ttsCache[key]){const a=getPooledAudio();a.src=ttsCache[key];currentTTS=a;a.play().catch(()=>{a._inUse=false;});return;}
   try{
     const r=await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN_VOICE}`,{
       method:'POST',headers:{'xi-api-key':ELEVEN_KEY,'Content-Type':'application/json'},
@@ -195,13 +221,20 @@ async function speak(text,opts={}){
         voice_settings:{stability:0.35,similarity_boost:0.75,style:0.7,use_speaker_boost:true}})});
     if(!r.ok)throw new Error('ElevenLabs API error');
     const b=await r.blob(),u=URL.createObjectURL(b);
-    ttsCache[key]=u;const a=new Audio(u);currentTTS=a;a.play().catch(()=>{});
+    ttsCache[key]=u;const a=getPooledAudio();a.src=u;currentTTS=a;a.play().catch(()=>{a._inUse=false;});
   }catch(e){
     if(!window.speechSynthesis)return;
     const u=new SpeechSynthesisUtterance(text);u.rate=opts.rate||0.95;u.pitch=opts.pitch||1.05;
     u.volume=opts.volume||1;window.speechSynthesis.speak(u);
   }
 }
+
+const BYE_LINES=[
+  "Bye bye {state}!","You're outta here, {state}!","See ya later, {state}!",
+  "So long, {state}!","Hit the road, {state}!","Adios, {state}!",
+  "Peace out, {state}!","Better luck next time, {state}!",
+  "{state}, you've been eliminated!","Goodbye, {state}!",
+];
 
 function getQuizChoices(stateName){
   const correct=CAPITALS[stateName];
@@ -509,7 +542,7 @@ export default function App(){
     return()=>window.speechSynthesis?.removeEventListener?.('voiceschanged',h);},[]);
 
   useEffect(()=>{
-    const handler=()=>{unlockAudio();document.removeEventListener('touchstart',handler);document.removeEventListener('click',handler);};
+    const handler=()=>{unlockAudio();primeAudioPool();document.removeEventListener('touchstart',handler);document.removeEventListener('click',handler);};
     document.addEventListener('touchstart',handler,{once:true});
     document.addEventListener('click',handler,{once:true});
     return()=>{document.removeEventListener('touchstart',handler);document.removeEventListener('click',handler);};
@@ -581,7 +614,8 @@ export default function App(){
   };
 
   const proceedToNext=()=>{
-    speak("Bye bye "+loser,{rate:1.1,pitch:1.1});
+    const bye=BYE_LINES[Math.floor(Math.random()*BYE_LINES.length)].replace('{state}',loser);
+    speak(bye,{rate:1.1,pitch:1.1});
     const na=active.filter(n=>n!==loser),ne=[...eliminated,loser];
     setActive(na);setEliminated(ne);
     setMapF1(null);setMapF2(null);setPendingF1(null);setPendingF2(null);
@@ -604,7 +638,7 @@ export default function App(){
   return(
     <div style={{minHeight:'100vh',background:'linear-gradient(150deg,#0f172a 0%,#1e1b4b 40%,#172554 100%)',
       color:'#e2e8f0',fontFamily:'system-ui,-apple-system,sans-serif',padding:12,boxSizing:'border-box',position:'relative',overflow:'hidden'}}
-      onClick={unlockAudio}>
+      onClick={()=>{unlockAudio();primeAudioPool();}}>
       <Confetti active={confettiActive} duration={phase==='champion'?6000:3500}/>
       <FlashOverlay text={flashText} color={flashColor} emoji={flashEmoji} visible={flashVisible} sub={flashSub}/>
       <CountdownOverlay number={countdown}/>
