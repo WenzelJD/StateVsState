@@ -75,6 +75,10 @@ function centroid(geom,name){
 }
 const hsl=(i,n)=>`hsl(${(i*360/n)%360},${60+((i*5)%15)}%,${50+((i*3)%12)}%)`;
 
+// ===== AUDIO ENGINE (iOS-compatible) =====
+// All audio goes through a single AudioContext, unlocked once on user gesture.
+// TTS uses decodeAudioData → BufferSource (not HTML Audio) so iOS allows playback
+// even from non-gesture callbacks like onTransitionEnd / setTimeout.
 let audioUnlocked=false;
 const acRef={current:null};
 function ac(){
@@ -88,16 +92,14 @@ function unlockAudio(){
     const ctx=ac();
     const buf=ctx.createBuffer(1,1,22050);const src=ctx.createBufferSource();
     src.buffer=buf;src.connect(ctx.destination);src.start(0);
-    const a=new Audio();a.src='data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
-    a.play().then(()=>a.pause()).catch(()=>{});
     audioUnlocked=true;
   }catch(e){}
 }
 
 const ELEVEN_KEY='sk_48c0b41e89d95d9b9d0bfa159cc77c4856e33fd88dbaa233';
 const ELEVEN_VOICE='onwK4e9ZLuTAKqWW03F9';
-const ttsCache={};
-let currentTTS=null;
+const ttsBufferCache={};
+let currentTTSSource=null;
 
 function playTick(){
   try{const c=ac(),o=c.createOscillator(),g=c.createGain();o.connect(g);g.connect(c.destination);
@@ -158,6 +160,32 @@ function playBuzzer(){
   g.gain.exponentialRampToValueAtTime(0.001,t+0.5);
   o1.start(t);o1.stop(t+0.5);o2.start(t);o2.stop(t+0.5);}catch(e){}
 }
+function playFanfare(){
+  try{const c=ac(),t=c.currentTime,m=c.createGain();
+  m.gain.setValueAtTime(0.3,t);m.gain.setValueAtTime(0.3,t+1.8);
+  m.gain.exponentialRampToValueAtTime(0.001,t+2.5);m.connect(c.destination);
+  // Trumpet-like: brass triads with bright timbre
+  const notes=[
+    {f:523,s:0,d:0.15},{f:659,s:0.15,d:0.15},{f:784,s:0.3,d:0.15},
+    {f:1047,s:0.5,d:0.4},// high C hold
+    {f:784,s:1.0,d:0.12},{f:880,s:1.12,d:0.12},{f:1047,s:1.3,d:0.6},// final C
+  ];
+  notes.forEach(n=>{
+    // Each note: fundamental + harmonics for brass timbre
+    [1,2,3,4].forEach((h,hi)=>{
+      const o=c.createOscillator(),g=c.createGain();
+      o.type=hi===0?'sawtooth':'sine';
+      o.frequency.value=n.f*h;
+      const vol=0.25/(h*h);
+      g.gain.setValueAtTime(0,t+n.s);
+      g.gain.linearRampToValueAtTime(vol,t+n.s+0.02);
+      g.gain.setValueAtTime(vol,t+n.s+n.d*0.7);
+      g.gain.exponentialRampToValueAtTime(0.001,t+n.s+n.d+0.1);
+      o.connect(g);g.connect(m);
+      o.start(t+n.s);o.stop(t+n.s+n.d+0.15);
+    });
+  });}catch(e){}
+}
 function playApplause(big){
   try{const c=ac(),dur=big?5:3.5,t=c.currentTime,m=c.createGain();
   m.gain.setValueAtTime(0.001,t);m.gain.linearRampToValueAtTime(big?0.5:0.35,t+0.4);
@@ -185,43 +213,43 @@ function playApplause(big){
   ss.connect(sbp);sbp.connect(sg);sg.connect(m);ss.start(st);ss.stop(st+sd);}}}catch(e){}
 }
 
-// iOS requires Audio elements to be "primed" during user gesture.
-// We keep a pool of pre-created Audio elements ready to play.
-const audioPool=[];
-function getPooledAudio(){
-  let a=audioPool.find(x=>x.paused&&!x._inUse);
-  if(!a){a=new Audio();audioPool.push(a);}
-  a._inUse=true;
-  a.onended=()=>{a._inUse=false;};
-  a.onerror=()=>{a._inUse=false;};
-  return a;
-}
-// Prime audio pool on user gestures for iOS
-function primeAudioPool(){
-  if(audioPool.length<3){
-    for(let i=audioPool.length;i<3;i++){
-      const a=new Audio();a.src='data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
-      a.play().then(()=>{a.pause();a.currentTime=0;a.src='';}).catch(()=>{});
-      audioPool.push(a);
-    }
-  }
+// ===== TTS via AudioContext (iOS-safe) =====
+// Decodes audio into the unlocked AudioContext so it plays even from
+// non-gesture callbacks (onTransitionEnd, setTimeout, etc.)
+function stopTTS(){
+  try{if(currentTTSSource){currentTTSSource.stop();}}catch(e){}
+  currentTTSSource=null;
+  window.speechSynthesis?.cancel();
 }
 
 async function speak(text,opts={}){
-  if(currentTTS){currentTTS.pause();currentTTS.currentTime=0;currentTTS._inUse=false;currentTTS=null;}
-  window.speechSynthesis?.cancel();
-  // Ensure AudioContext is active (iOS suspends it)
-  ac();
+  stopTTS();
+  const ctx=ac();
   const key=text.toLowerCase().trim();
-  if(ttsCache[key]){const a=getPooledAudio();a.src=ttsCache[key];currentTTS=a;a.play().catch(()=>{a._inUse=false;});return;}
+
+  const playFromBuffer=(ab)=>{
+    // Must slice() because decodeAudioData detaches the ArrayBuffer
+    return ctx.decodeAudioData(ab.slice(0)).then(decoded=>{
+      const src=ctx.createBufferSource();
+      src.buffer=decoded;src.connect(ctx.destination);src.start(0);
+      currentTTSSource=src;
+      return new Promise(resolve=>{src.onended=resolve;});
+    });
+  };
+
+  if(ttsBufferCache[key]){
+    playFromBuffer(ttsBufferCache[key]).catch(()=>{});
+    return;
+  }
   try{
     const r=await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN_VOICE}`,{
       method:'POST',headers:{'xi-api-key':ELEVEN_KEY,'Content-Type':'application/json'},
       body:JSON.stringify({text,model_id:'eleven_multilingual_v2',
         voice_settings:{stability:0.35,similarity_boost:0.75,style:0.7,use_speaker_boost:true}})});
     if(!r.ok)throw new Error('ElevenLabs API error');
-    const b=await r.blob(),u=URL.createObjectURL(b);
-    ttsCache[key]=u;const a=getPooledAudio();a.src=u;currentTTS=a;a.play().catch(()=>{a._inUse=false;});
+    const ab=await r.arrayBuffer();
+    ttsBufferCache[key]=ab;
+    playFromBuffer(ab).catch(()=>{});
   }catch(e){
     if(!window.speechSynthesis)return;
     const u=new SpeechSynthesisUtterance(text);u.rate=opts.rate||0.95;u.pitch=opts.pitch||1.05;
@@ -244,6 +272,7 @@ function getQuizChoices(stateName){
   return{correct,choices};
 }
 
+// ===== CONFETTI =====
 function Confetti({active,duration=3000}){
   const canvasRef=useRef(null);const animRef=useRef(null);const particles=useRef([]);const startRef=useRef(0);
   useEffect(()=>{
@@ -435,7 +464,7 @@ function QuizOverlay({stateName,onComplete}){
     if(choice===quiz.correct){
       setSelected(choice);setCorrect(true);playDing();
       setTimeout(()=>speak(`Correct! ${quiz.correct} is the capital of ${stateName}!`),300);
-      setTimeout(()=>onComplete(),3000);
+      setTimeout(()=>onComplete(),5500);
     }else{
       setShake(choice);playBuzzer();
       speak("Try again!");
@@ -527,6 +556,7 @@ export default function App(){
   const [trans2,setTrans2]=useState(false);
   const [transB,setTransB]=useState(false);
   const [showQuiz,setShowQuiz]=useState(false);
+  const [quizEnabled,setQuizEnabled]=useState(true);
   const [quizScore,setQuizScore]=useState({correct:0,total:0});
 
   const showBattle=phase==='battleReady'||phase==='countdown'||phase==='battling'||phase==='result'||phase==='quiz';
@@ -542,7 +572,7 @@ export default function App(){
     return()=>window.speechSynthesis?.removeEventListener?.('voiceschanged',h);},[]);
 
   useEffect(()=>{
-    const handler=()=>{unlockAudio();primeAudioPool();document.removeEventListener('touchstart',handler);document.removeEventListener('click',handler);};
+    const handler=()=>{unlockAudio();document.removeEventListener('touchstart',handler);document.removeEventListener('click',handler);};
     document.addEventListener('touchstart',handler,{once:true});
     document.addEventListener('click',handler,{once:true});
     return()=>{document.removeEventListener('touchstart',handler);document.removeEventListener('click',handler);};
@@ -599,7 +629,7 @@ export default function App(){
 
   const onBEnd=()=>{setTransB(false);const w=window._bw;
     const wn=w===0?f1:f2,ln=w===0?f2:f1;
-    setWinner(wn);setLoser(ln);setConfettiActive(true);
+    setWinner(wn);setLoser(ln);playFanfare();setConfettiActive(true);
     setTimeout(()=>setConfettiActive(false),3500);
     const calls=["wins!","takes it!","moves on!","is the winner!","dominates!","gets a huge victory!"];
     showFlash(wn+' Wins!','#4ade80','🎉',2500);
@@ -613,9 +643,11 @@ export default function App(){
     proceedToNext();
   };
 
+  const skipQuizToNext=()=>{proceedToNext();};
+
   const proceedToNext=()=>{
     const bye=BYE_LINES[Math.floor(Math.random()*BYE_LINES.length)].replace('{state}',loser);
-    speak(bye,{rate:1.1,pitch:1.1});
+    setTimeout(()=>speak(bye,{rate:1.1,pitch:1.1}),800);
     const na=active.filter(n=>n!==loser),ne=[...eliminated,loser];
     setActive(na);setEliminated(ne);
     setMapF1(null);setMapF2(null);setPendingF1(null);setPendingF2(null);
@@ -638,7 +670,7 @@ export default function App(){
   return(
     <div style={{minHeight:'100vh',background:'linear-gradient(150deg,#0f172a 0%,#1e1b4b 40%,#172554 100%)',
       color:'#e2e8f0',fontFamily:'system-ui,-apple-system,sans-serif',padding:12,boxSizing:'border-box',position:'relative',overflow:'hidden'}}
-      onClick={()=>{unlockAudio();primeAudioPool();}}>
+      onClick={unlockAudio}>
       <Confetti active={confettiActive} duration={phase==='champion'?6000:3500}/>
       <FlashOverlay text={flashText} color={flashColor} emoji={flashEmoji} visible={flashVisible} sub={flashSub}/>
       <CountdownOverlay number={countdown}/>
@@ -684,7 +716,7 @@ export default function App(){
                 ⚔️ Battle!
               </button>
             )}
-            {phase==='result'&&(
+            {phase==='result'&&quizEnabled&&(
               <button onClick={startQuiz}
                 style={{padding:'14px 28px',fontSize:16,fontWeight:700,
                   background:'linear-gradient(135deg,#7c3aed,#6d28d9)',color:'#fff',
@@ -694,6 +726,18 @@ export default function App(){
                 onMouseEnter={e=>e.target.style.transform='scale(1.05)'}
                 onMouseLeave={e=>e.target.style.transform='scale(1)'}>
                 🧠 Capital Quiz!
+              </button>
+            )}
+            {phase==='result'&&!quizEnabled&&(
+              <button onClick={skipQuizToNext}
+                style={{padding:'14px 28px',fontSize:16,fontWeight:700,
+                  background:'linear-gradient(135deg,#059669,#10b981)',color:'#fff',
+                  border:'none',borderRadius:14,cursor:'pointer',
+                  boxShadow:'0 6px 22px rgba(16,185,129,0.4)',
+                  animation:'gentlePulse 2s ease-in-out infinite',letterSpacing:1}}
+                onMouseEnter={e=>e.target.style.transform='scale(1.05)'}
+                onMouseLeave={e=>e.target.style.transform='scale(1)'}>
+                {active.length<=2?'👑 Crown the Champion!':'➡️ Next Round!'}
               </button>
             )}
           </div>
@@ -735,7 +779,7 @@ export default function App(){
               <div style={{fontSize:64,marginBottom:4,animation:'champBounce 1s ease-in-out infinite'}}>👑</div>
               <div style={{fontSize:28,fontWeight:900,color:'#fbbf24',letterSpacing:3}}>{champion}</div>
               <div style={{fontSize:16,color:'#f59e0b',margin:'8px 0',fontWeight:700}}>🏆 Grand Champion! 🏆</div>
-              <div style={{fontSize:12,color:'#94a3b8',fontWeight:600}}>Won {round} battles! · Quiz: {quizScore.correct}/{quizScore.total}</div>
+              <div style={{fontSize:12,color:'#94a3b8',fontWeight:600}}>Won {round} battles!{quizScore.total>0&&` · Quiz: ${quizScore.correct}/${quizScore.total}`}</div>
               <button onClick={resetGame}
                 style={{marginTop:16,padding:'12px 24px',fontSize:14,fontWeight:700,
                   background:'linear-gradient(135deg,#7c3aed,#6d28d9)',color:'#fff',
@@ -771,7 +815,13 @@ export default function App(){
             </div>
           )}
           {!champion&&(
-            <div style={{marginTop:8,textAlign:'right'}}>
+            <div style={{marginTop:8,display:'flex',justifyContent:'flex-end',alignItems:'center',gap:12}}>
+              <label style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',fontSize:12,color:'#94a3b8',fontWeight:600,userSelect:'none'}}
+                onClick={e=>e.stopPropagation()}>
+                <input type="checkbox" checked={quizEnabled} onChange={e=>setQuizEnabled(e.target.checked)}
+                  style={{width:16,height:16,accentColor:'#7c3aed',cursor:'pointer'}}/>
+                🧠 Capital Quizzes
+              </label>
               <button onClick={resetGame}
                 style={{padding:'6px 16px',fontSize:12,background:'transparent',color:'#64748b',
                   border:'1px solid #334155',borderRadius:8,cursor:'pointer',fontWeight:600}}>
