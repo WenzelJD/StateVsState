@@ -177,7 +177,7 @@ async function speak(text,opts={}){
   stopTTS();const ctx=ac();const key=text.toLowerCase().trim();
   const play=(ab)=>ctx.decodeAudioData(ab.slice(0)).then(d=>{const src=ctx.createBufferSource();src.buffer=d;src.connect(ctx.destination);src.start(0);curTTS=src;return new Promise(r=>{src.onended=r;});});
   if(ttsCache[key]){play(ttsCache[key]).catch(()=>{});return;}
-  try{const r=await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN_VOICE}`,{method:'POST',headers:{'xi-api-key':ELEVEN_KEY,'Content-Type':'application/json'},body:JSON.stringify({text,model_id:'eleven_multilingual_v2',voice_settings:{stability:0.35,similarity_boost:0.75,style:0.7,use_speaker_boost:true}})});if(!r.ok)throw 0;const ab=await r.arrayBuffer();ttsCache[key]=ab;play(ab).catch(()=>{});}catch(e){if(!window.speechSynthesis)return;const u=new SpeechSynthesisUtterance(text);u.rate=opts.rate||0.95;u.pitch=opts.pitch||1.05;window.speechSynthesis.speak(u);}
+  try{const r=await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN_VOICE}`,{method:'POST',headers:{'xi-api-key':ELEVEN_KEY,'Content-Type':'application/json'},body:JSON.stringify({text,model_id:'eleven_multilingual_v2',voice_settings:{stability:0.35,similarity_boost:0.75,style:0.7,use_speaker_boost:true}})});if(!r.ok)throw 0;const ab=await r.arrayBuffer();ttsCache[key]=ab;play(ab).catch(()=>{});}catch(e){if(!window.speechSynthesis)return;const u=new SpeechSynthesisUtterance(text);u.rate=opts.rate||0.95;u.pitch=opts.pitch||1.05;u.volume=opts.volume||1;const voices=window.speechSynthesis.getVoices();const pref=voices.find(v=>v.name.includes('Google'))||voices.find(v=>v.name.includes('Samantha'))||voices.find(v=>v.lang.startsWith('en'));if(pref)u.voice=pref;window.speechSynthesis.speak(u);}
 }
 
 const BYE=["Bye bye {s}!","You're outta here, {s}!","See ya, {s}!","So long, {s}!","Hit the road, {s}!","Adios, {s}!","Peace out, {s}!","{s} has been conquered!","{s} has fallen!"];
@@ -267,7 +267,7 @@ function QuizOverlay({stateName,onComplete}){
 
 export default function App(){
   const [features,setFeatures]=useState([]);
-  const init=()=>({t:Object.fromEntries(ALL_ENTITIES.map(s=>[s,s])),p:Object.fromEntries(ALL_ENTITIES.map(s=>[s,5]))});
+  const init=()=>({t:Object.fromEntries(ALL_ENTITIES.map(s=>[s,s])),p:Object.fromEntries(ALL_ENTITIES.map(s=>[s,50]))});
   const [territories,setTerritories]=useState(()=>init().t);
   const [populations,setPopulations]=useState(()=>init().p);
   const [active,setActive]=useState(ALL_ENTITIES);
