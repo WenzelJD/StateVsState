@@ -156,7 +156,7 @@ let audioUnlocked=false;const acRef={current:null};
 function ac(){if(!acRef.current)acRef.current=new(window.AudioContext||window.webkitAudioContext)();if(acRef.current.state==='suspended')acRef.current.resume().catch(()=>{});return acRef.current;}
 function unlockAudio(){if(audioUnlocked)return;try{const ctx=ac();const buf=ctx.createBuffer(1,1,22050);const src=ctx.createBufferSource();src.buffer=buf;src.connect(ctx.destination);src.start(0);audioUnlocked=true;preloadVictory();}catch(e){}}
 
-const ELEVEN_KEY='sk_48c0b41e89d95d9b9d0bfa159cc77c4856e33fd88dbaa233';
+const ELEVEN_KEY='sk_d5ce23d4b1755f5d3efb6d7c4e28e8a750d0384c410fd943';
 const ELEVEN_VOICE='onwK4e9ZLuTAKqWW03F9';
 const ttsCache={};let curTTS=null;
 
